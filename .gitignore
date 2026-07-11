@@ -56,3 +56,14 @@ CodeCoverage/
 TestResult.xml
 nunit-*.xml
 /.vs
+
+# Auth artifacts and local sensitive files
+*.zip
+.env.*
+terraform.tfvars
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform/
+appsettings.*.local.json
+coverage/

@@ -1,0 +1,8 @@
+{
+  "version": "2.0",
+  "type": "REQUEST",
+  "headers": {
+    "authorization": "Bearer synthetic-token"
+  }
+}
+

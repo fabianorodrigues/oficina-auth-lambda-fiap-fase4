@@ -1,0 +1,61 @@
+name: Auth CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "config/**"
+      - "terraform/**"
+      - "scripts/**"
+      - "samples/**"
+      - "*.sln"
+      - "**/*.csproj"
+      - ".config/dotnet-tools.json"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+      - uses: hashicorp/setup-terraform@v4
+      - name: Restore tools
+        run: dotnet tool restore
+      - name: Restore
+        run: dotnet restore Oficina.Auth.sln
+      - name: Build
+        run: dotnet build Oficina.Auth.sln -c Release --no-restore
+      - name: Test
+        run: dotnet test Oficina.Auth.sln -c Release --no-build --collect:"XPlat Code Coverage"
+      - name: Vulnerable packages
+        run: dotnet list Oficina.Auth.sln package --vulnerable --include-transitive
+      - name: Validate official config
+        shell: pwsh
+        run: ./scripts/validate-official-config.ps1
+      - name: Package Lambdas
+        shell: pwsh
+        run: ./scripts/package-lambdas.ps1
+      - name: Terraform fmt
+        working-directory: terraform/auth
+        run: terraform fmt -check -recursive
+      - name: Terraform init without backend
+        working-directory: terraform/auth
+        run: terraform init -backend=false
+      - name: Terraform validate
+        working-directory: terraform/auth
+        run: terraform validate
+      - name: JWT sync dry run
+        shell: pwsh
+        run: |
+          $env:JWT_SIGNING_KEY = "Synthetic-Jwt-Signing-Key-At-Least-32-Bytes!"
+          ./scripts/sync-jwt-secret.ps1 -DryRun
+          Remove-Item Env:JWT_SIGNING_KEY
+
