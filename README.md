@@ -1,6 +1,11 @@
 # oficina-auth-lambda-fiap-fase4
 
-Implementa autenticacao por CPF/senha e validacao JWT para a Fase 4.
+## Responsabilidade
+
+Implementa autenticacao por CPF/senha e validacao JWT para a solução Oficina,
+por meio de duas Lambdas independentes. Provisionado após
+[oficina-infra-fiap-fase4](../oficina-infra-fiap-fase4/README.md) (Infra DB e
+Platform) e antes dos três microsserviços.
 
 ## Componentes
 
@@ -12,8 +17,8 @@ Implementa autenticacao por CPF/senha e validacao JWT para a Fase 4.
 ## Fluxo
 
 ```text
-Cliente -> API Gateway futuro -> oficina-auth-cpf -> OficinaCadastroDb -> JWT
-Cliente com JWT -> API Gateway futuro -> oficina-authorizer -> claims -> rota autorizada
+Cliente -> API Gateway -> oficina-auth-cpf -> OficinaCadastroDb -> JWT
+Cliente com JWT -> API Gateway -> oficina-authorizer -> claims -> rota autorizada
 ```
 
 ## JWT
@@ -25,7 +30,7 @@ Cliente com JWT -> API Gateway futuro -> oficina-authorizer -> claims -> rota au
 - Clock skew: 60 segundos
 - Claims: `sub`, `cpf`, `role`, `name`, `iat`, `exp`, `jti`
 
-A chave fica somente no Secrets Manager em `/oficina/auth/jwt`, campo `SigningKey`. O deploy nao recebe `JWT_SIGNING_KEY`; a sincronizacao ocorre pelo workflow `Auth JWT Secret Sync`.
+A chave fica somente no Secrets Manager em `/oficina/auth/jwt`, campo `SigningKey`. O deploy nao recebe `JWT_SIGNING_KEY`; a sincronizacao ocorre pelo workflow `Auth Secret Sync`.
 
 ## Banco
 
@@ -33,20 +38,15 @@ A Lambda consulta somente a tabela real `Funcionarios` do `OficinaCadastroDb`, c
 
 O hash de senha segue o contrato atual do Cadastro: `PBKDF2-SHA256$100000$salt$hash`.
 
-## Execucao futura
+## Provisionamento
 
-1. `Auth JWT Secret Sync`
+1. `Auth Secret Sync`
 2. `Auth Deploy`
-3. `Auth Smoke Test`
-4. Deploy do Entrypoint em etapa posterior
+3. Deploy do Entrypoint em etapa posterior, que depende das duas Lambdas publicadas
 
-## Rollback
+## Limitacoes conhecidas
 
-Rollback altera apenas o alias `live` para uma versao publicada anterior. Nao apaga versoes, nao altera `$LATEST`, nao altera banco e nao faz rollback de secret.
-
-## Limitacoes academicas
-
-Esta etapa usa HS256 e nao implementa refresh token, Cognito, MFA ou revogacao imediata. Em ambiente corporativo, avaliar RS256/ES256, KMS, IdP central, rotacao automatizada e MFA.
+Esta etapa usa HS256 e nao implementa refresh token, Cognito, MFA ou revogacao imediata de token.
 
 ## Validacoes locais
 
@@ -72,3 +72,11 @@ terraform validate
 ```
 
 Nao executar `terraform apply`, workflows ou comandos AWS mutantes localmente nesta etapa.
+
+## Próximo componente
+
+Após `Auth Secret Sync` e `Auth Deploy`, siga para
+[oficina-cadastro-fiap-fase4](../oficina-cadastro-fiap-fase4/README.md),
+[oficina-estoque-fiap-fase4](../oficina-estoque-fiap-fase4/README.md) e
+[oficina-ordens-servico-fiap-fase4](../oficina-ordens-servico-fiap-fase4/README.md),
+que podem ser implantados de forma independente e em paralelo.

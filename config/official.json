@@ -1,8 +1,7 @@
 {
   "version": 1,
   "project": {
-    "name": "oficina",
-    "academicProject": "fiap-fase4"
+    "name": "oficina"
   },
   "functions": {
     "authCpf": {
