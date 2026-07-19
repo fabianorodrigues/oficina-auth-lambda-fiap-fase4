@@ -30,7 +30,7 @@ Cliente com JWT -> API Gateway -> oficina-authorizer -> claims -> rota autorizad
 - Clock skew: 60 segundos
 - Claims: `sub`, `cpf`, `role`, `name`, `iat`, `exp`, `jti`
 
-A chave fica somente no Secrets Manager em `/oficina/auth/jwt`, campo `SigningKey`. O deploy nao recebe `JWT_SIGNING_KEY`; a sincronizacao ocorre pelo workflow `Auth Secret Sync`.
+A chave fica somente no Secrets Manager em `/oficina/auth/jwt`, campo `SigningKey`. O workflow `Auth Deploy` consome o Repository Secret `JWT_SIGNING_KEY`, aplica Terraform, cria o container do secret quando necessario e sincroniza a versao `AWSCURRENT` sem imprimir o valor.
 
 ## Banco
 
@@ -40,9 +40,9 @@ O hash de senha segue o contrato atual do Cadastro: `PBKDF2-SHA256$100000$salt$h
 
 ## Provisionamento
 
-1. `Auth Secret Sync`
-2. `Auth Deploy`
-3. Deploy do Entrypoint em etapa posterior, que depende das duas Lambdas publicadas
+1. `Auth Deploy`
+2. Deploy dos microsservicos
+3. `Entrypoint Deploy`, que depende das duas Lambdas publicadas com alias `live`
 
 ## Limitacoes conhecidas
 
@@ -75,7 +75,7 @@ Nao executar `terraform apply`, workflows ou comandos AWS mutantes localmente ne
 
 ## Próximo componente
 
-Após `Auth Secret Sync` e `Auth Deploy`, siga para
+Após `Auth Deploy`, siga para
 [oficina-cadastro-fiap-fase4](../oficina-cadastro-fiap-fase4/README.md),
 [oficina-estoque-fiap-fase4](../oficina-estoque-fiap-fase4/README.md) e
 [oficina-ordens-servico-fiap-fase4](../oficina-ordens-servico-fiap-fase4/README.md),

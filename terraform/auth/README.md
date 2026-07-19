@@ -2,7 +2,7 @@
 
 Stack independente para `oficina-auth-cpf` e `oficina-authorizer`.
 
-O backend usa a key `oficina/auth/terraform.tfstate`. O secret `/oficina/auth/jwt` e criado apenas como container; o valor `SigningKey` e sincronizado por workflow separado.
+O backend usa a key `oficina/auth/terraform.tfstate`. O bucket do state e resolvido pelo workflow como `oficina-terraform-state-<account-id>-<AWS_REGION>`, com fallback temporario para `TF_STATE_BUCKET` durante migracao. O secret `/oficina/auth/jwt` e criado como container pelo Terraform; o valor `SigningKey` e sincronizado pelo proprio `Auth Deploy`.
 
 Entradas vindas de SSM:
 
