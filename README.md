@@ -1,54 +1,70 @@
 # oficina-auth-lambda
 
-> Autenticação da solução Oficina: login por CPF e validação de token na borda da API.
-> **.NET 10** · **AWS Lambda** · **Terraform** · **JWT HS256** · **GitHub Actions**
+Autenticação da solução **Oficina**: login por CPF e validação de token JWT na borda da API.
+
+![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)
+![AWS Lambda](https://img.shields.io/badge/AWS-Lambda-FF9900?logo=awslambda&logoColor=white)
+![Terraform](https://img.shields.io/badge/Terraform-1.10-7B42BC?logo=terraform&logoColor=white)
+![JWT](https://img.shields.io/badge/JWT-HS256-000000?logo=jsonwebtokens&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)
 
 ---
 
-## A solução
+## Sumário
 
-A **Oficina** é uma plataforma de gestão de oficina mecânica distribuída em **6 repositórios** que compõem um único sistema na AWS. O cliente acessa uma API Gateway que autentica na borda e encaminha o tráfego para três microsserviços .NET 10 em EKS, que se comunicam por HTTP e por filas SQS FIFO e persistem em um RDS SQL Server compartilhado.
-
-| Repositório | Responsabilidade |
-|---|---|
-| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos e estado do Terraform |
-| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma EKS e entrypoint de API |
-| **oficina-auth-lambda** *(este)* | Autenticação por CPF e emissão de token |
-| [oficina-cadastro](https://github.com/fabianorodrigues/oficina-cadastro-fiap-fase4) | Clientes, veículos, funcionários e catálogo de serviços |
-| [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4) | Peças, insumos, saldos e reservas |
-| [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) | Ordens de serviço, orçamento e saga de pagamento |
+- [Visão geral](#visão-geral)
+- [Ordem de deploy da solução](#ordem-de-deploy-da-solução)
+- [Arquitetura](#arquitetura)
+- [Contrato de segurança](#contrato-de-segurança)
+- [O que consome e o que publica](#o-que-consome-e-o-que-publica)
+- [Configuração](#configuração)
+- [Como executar](#como-executar)
+- [Validação](#validação)
+- [Execução local](#execução-local)
+- [Limitações conhecidas](#limitações-conhecidas)
+- [Próximas etapas](#próximas-etapas)
 
 ---
 
-## Ordem de deploy
+## Visão geral
+
+A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AWS e distribuída em **6 repositórios** que compõem um único sistema. O cliente acessa uma **API Gateway HTTP**, que autentica na borda por uma **Lambda authorizer** e encaminha o tráfego, via **VPC Link**, para um **ALB interno** que roteia para três microsserviços **.NET 10 em ECS Fargate**. Os serviços se comunicam por HTTP interno e por filas **SQS FIFO**, e persistem em um **RDS SQL Server** compartilhado.
+
+| Repositório | Responsabilidade | Etapas |
+|---|---|:---:|
+| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos e estado do Terraform | 1 e 3 |
+| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma ECS/ALB e entrada de API | 2, 6 e 7 |
+| **oficina-auth-lambda** *(este)* | Autenticação por CPF e validação de token | 4 |
+| [oficina-cadastro](https://github.com/fabianorodrigues/oficina-cadastro-fiap-fase4) | Clientes, veículos, funcionários e catálogo de serviços | 5 |
+| [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4) | Peças, insumos, saldos e reservas | 5 |
+| [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) | Ordens de serviço, orçamento e saga de pagamento | 5 e 8 |
+
+**Papel deste repositório:** duas funções Lambda independentes que sustentam a segurança da solução.
+
+| Função | Papel | Rede | Segredos |
+|---|---|---|---|
+| **auth-cpf** | Recebe CPF e senha, valida no banco e emite o token | Dentro da VPC, saída apenas para o RDS | Chave de assinatura e credencial de banco |
+| **authorizer** | Valida o token a cada requisição e devolve as *claims* à API Gateway | Fora da VPC | Apenas a chave de assinatura |
+
+Ambas são publicadas com o alias `live`, o alvo estável referenciado pela API Gateway — a API nunca aponta para a versão mutável da função.
+
+---
+
+## Ordem de deploy da solução
 
 | # | Repositório | Workflow | Confirmação |
-|---|---|---|---|
+|:---:|---|---|:---:|
 | 1 | oficina-infra-db | Database Infrastructure Deploy | `APPLY` |
 | 2 | oficina-infra | Platform Deploy | `APPLY` |
 | 3 | oficina-infra-db | Database Bootstrap | `BOOTSTRAP` |
 | **4** | **oficina-auth-lambda** | **Auth Deploy** | `DEPLOY` |
 | 5 | cadastro · estoque · ordens-servico | Deploy | `DEPLOY` |
 | 6 | oficina-infra | Entrypoint Deploy | `APPLY` |
-| 7 | oficina-infra | Observability Validate | `VALIDATE` |
+| 7 | oficina-infra | Observability Validate | — |
 | 8 | oficina-ordens-servico | AWS E2E Validate | `VALIDATE` |
 
-> Este repositório é a **etapa 4**. Depende da rede e do segredo de banco criados na etapa 1, e precisa estar publicado antes da etapa 6, porque o entrypoint só consegue montar o autorizador se as duas funções já tiverem alias publicado.
->
-> O login só funciona de ponta a ponta depois que a etapa 3 criar os bancos e a etapa 5 aplicar o esquema do cadastro, que é onde a tabela de funcionários vive.
-
----
-
-## Responsabilidade
-
-Duas funções Lambda independentes, com privilégios distintos:
-
-| Função | Papel | Rede | Acesso a segredo |
-|---|---|---|---|
-| **auth-cpf** | Recebe CPF e senha, valida contra o banco e emite o token | Dentro da VPC, com saída apenas para o RDS | Chave de assinatura e credencial de banco |
-| **authorizer** | Valida o token a cada requisição e devolve as claims à API Gateway | Fora da VPC | Apenas a chave de assinatura |
-
-Ambas são publicadas com o alias `live`, que é o alvo estável referenciado pela API Gateway — a API nunca aponta para a versão mutável da função.
+> [!IMPORTANT]
+> Este repositório é a **etapa 4**. Depende da rede e do segredo de banco criados na etapa 1, e precisa estar publicado **antes da etapa 6**, porque o entrypoint só monta o autorizador se as duas funções já tiverem o alias `live` publicado. O login funciona de ponta a ponta somente após a etapa 3 criar os bancos e a etapa 5 aplicar o esquema do cadastro, onde vive a tabela de funcionários.
 
 ---
 
@@ -65,7 +81,7 @@ sequenceDiagram
     participant S as Secrets Manager
     participant D as RDS SQL Server
 
-    C->>G: POST com CPF e senha
+    C->>G: POST /api/auth/cpf (CPF e senha)
     G->>L: encaminha a requisição
     L->>S: lê chave de assinatura e credencial
     L->>D: consulta o funcionário pelo CPF
@@ -82,7 +98,7 @@ sequenceDiagram
     participant C as Cliente
     participant G as API Gateway
     participant A as Lambda authorizer
-    participant B as Serviço no EKS
+    participant B as Serviço em ECS Fargate
 
     C->>G: requisição com o token
     G->>A: encaminha os cabeçalhos
@@ -97,18 +113,19 @@ sequenceDiagram
 
 | Item | Definição |
 |---|---|
-| **Algoritmo** | HS256, simétrico. Outros algoritmos são recusados, inclusive com verificação extra do cabeçalho do token |
+| **Algoritmo** | HS256, simétrico. Outros algoritmos são recusados, com verificação extra do cabeçalho do token |
+| **Emissor / público** | `oficina` / `oficina-api`; validade padrão de 60 minutos |
 | **Claims emitidas** | Identificador, CPF, perfil, nome, identificador do token e marcas de tempo |
 | **Validação** | Emissor, público, validade, assinatura e presença obrigatória de todas as claims |
 | **Senhas** | PBKDF2 com SHA-256 e no mínimo cem mil iterações; comparação em tempo fixo |
-| **Chave de assinatura** | No mínimo 32 bytes; valores de exemplo e marcadores de posição são recusados |
+| **Chave de assinatura** | No mínimo 32 bytes; valores de exemplo são recusados |
 | **CPF** | Normalizado e validado por dígito verificador; sempre mascarado nos logs |
 
 Falhas de login retornam sempre a mesma resposta genérica, sem distinguir usuário inexistente, inativo ou senha incorreta. O autorizador **falha fechado**: qualquer erro resulta em acesso negado.
 
 ---
 
-## Contrato de integração
+## O que consome e o que publica
 
 ### Consome
 
@@ -119,7 +136,7 @@ Falhas de login retornam sempre a mesma resposta genérica, sem distinguir usuá
 | `/oficina/infra/rds/security-group-id` | SSM | oficina-infra-db |
 | `/oficina/auth/database` | Secrets Manager | oficina-infra-db |
 
-O deploy verifica os quatro parâmetros e exige que o segredo de banco já tenha uma versão corrente. Se faltar qualquer um, a execução aborta antes de compilar.
+O deploy verifica os quatro valores e exige que o segredo de banco tenha uma versão corrente. Se faltar qualquer um, a execução aborta antes de compilar.
 
 ### Publica
 
@@ -127,9 +144,9 @@ O deploy verifica os quatro parâmetros e exige que o segredo de banco já tenha
 |---|---|---|
 | Alias e nome da função de login | `/oficina/auth/cpf/{alias-arn,function-name}` | oficina-infra (entrypoint) |
 | Alias e nome do autorizador | `/oficina/auth/authorizer/{alias-arn,function-name}` | oficina-infra (entrypoint) |
-| Chave de assinatura | `/oficina/auth/jwt` | as duas funções, em tempo de execução |
+| Chave de assinatura | `/oficina/auth/jwt` (Secrets Manager) | as duas funções, em runtime |
 
-O contêiner do segredo de assinatura é **criado por este repositório**; o valor é gravado pelo próprio Auth Deploy.
+O contêiner do segredo `/oficina/auth/jwt` é **criado por este repositório**; o valor é gravado pelo próprio Auth Deploy, de forma idempotente.
 
 ---
 
@@ -137,62 +154,65 @@ O contêiner do segredo de assinatura é **criado por este repositório**; o val
 
 Configure em **Settings → Secrets and variables → Actions** do repositório.
 
-### Secrets (obrigatórios)
+### Secrets
 
-| Secret | Uso |
-|---|---|
-| `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` | Credenciais temporárias da AWS |
-| `JWT_SIGNING_KEY` | Chave de assinatura do token |
+| Secret | Uso | Obrigatório |
+|---|---|:---:|
+| `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` | Credenciais temporárias da AWS | **Sim** |
+| `JWT_SIGNING_KEY` | Chave de assinatura do token (mínimo 32 bytes, sem quebras de linha) | **Sim** |
 
-A chave precisa ter **no mínimo 32 bytes**, não pode conter quebras de linha e é recusada se parecer um valor de exemplo. Gere uma chave forte com:
-
-```bash
-openssl rand -base64 48
-```
-
-O workflow aborta no primeiro passo se a chave não estiver configurada.
+Gere uma chave forte com `openssl rand -base64 48`. O workflow aborta no primeiro passo se a chave não estiver configurada ou parecer um valor de exemplo.
 
 ### Variables
 
-| Variable | Obrigatória | Uso |
+| Variable | Uso | Obrigatório |
+|---|---|:---:|
+| `AWS_REGION` | Região das funções e dos segredos | **Sim** |
+| `AUTH_CPF_ROLE_ARN` | ARN da role de execução da Lambda **auth-cpf** | **Sim** |
+| `AUTHORIZER_ROLE_ARN` | ARN da role de execução da Lambda **authorizer** | **Sim** |
+| `TF_STATE_BUCKET` | Compatibilidade com um bucket de estado pré-existente | Não |
+
+### Papéis IAM das Lambdas — não provisionados automaticamente
+
+Este deploy **não cria papéis IAM**: ele reutiliza roles externas e um passo de segurança **bloqueia o plano** se detectar criação de role. As duas roles **precisam existir antes da etapa 4** e ser informadas em `AUTH_CPF_ROLE_ARN` e `AUTHORIZER_ROLE_ARN`.
+
+| Variable | Trust | Permissões mínimas |
 |---|---|---|
-| `AWS_REGION` | **Sim** | Região das funções e dos segredos |
-| `TF_STATE_BUCKET` | Não | Apenas compatibilidade com um bucket de estado pré-existente |
+| `AUTH_CPF_ROLE_ARN` | `lambda.amazonaws.com` | `AWSLambdaBasicExecutionRole` · `AWSLambdaVPCAccessExecutionRole` · `secretsmanager:GetSecretValue` nos segredos `/oficina/auth/jwt` e `/oficina/auth/database` |
+| `AUTHORIZER_ROLE_ARN` | `lambda.amazonaws.com` | `AWSLambdaBasicExecutionRole` · `secretsmanager:GetSecretValue` no segredo `/oficina/auth/jwt` |
+
+> [!NOTE]
+> A função **auth-cpf** roda dentro da VPC (por isso exige acesso VPC na role); o **authorizer** roda fora da VPC. Se as variáveis não forem configuradas, o workflow falha com a mensagem `Repository Variable AUTH_CPF_ROLE_ARN is required to reuse existing Lambda execution roles`.
 
 ### O que é provisionado automaticamente
 
-Todas as funções, papéis, grupos de log, o grupo de segurança e o contêiner do segredo de assinatura são criados pelo workflow. As variáveis do Terraform têm valor padrão, exceto a região, preenchida a partir de `AWS_REGION`.
+As duas funções, os grupos de log, o grupo de segurança e o contêiner do segredo `/oficina/auth/jwt` são criados pelo workflow. As variáveis de ambiente das funções (emissor, público, validade e nomes dos segredos) têm valor padrão no Terraform e não precisam ser configuradas.
 
-As variáveis de ambiente das funções (emissor, público, validade do token, cache de segredo e nomes dos segredos) são definidas pelo Terraform e têm valor padrão no próprio código. Não há nada a configurar por variable do GitHub.
-
-> **Pré-requisito não provisionado aqui:** o bucket S3 de estado do Terraform, criado na **etapa 1** pelo repositório [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4). O workflow verifica sua existência e falha se ele não existir.
+> [!WARNING]
+> **Pré-requisito não provisionado aqui:** o bucket S3 de estado do Terraform, criado na **etapa 1** por [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4). O workflow verifica sua existência e falha se ele não existir.
 
 ---
 
-## Executar pelo GitHub Actions
+## Como executar
 
 **Actions → Auth Deploy → Run workflow → `confirmation` = `DEPLOY`**
 
-Roda apenas na branch `main` e a confirmação é **sensível a maiúsculas** — `deploy` em minúsculas é recusado.
+Roda apenas na branch `main`; a confirmação é **sensível a maiúsculas**.
 
-Sequência: valida a requisição e a chave → confere os pré-requisitos da etapa 1 → compila, testa e empacota as duas funções → planeja e aplica o Terraform → **grava a chave de assinatura no Secrets Manager** → valida funções, alias e segredos → executa o teste de fumaça.
-
-A gravação da chave acontece **dentro deste mesmo workflow**; não existe um pipeline separado de sincronização de segredo. A operação é idempotente: reexecutar com a mesma chave não cria nova versão do segredo.
-
-Um passo de segurança **interrompe o deploy se o plano previr exclusão** de função, segredo, parâmetro ou papel IAM.
+Sequência: valida a requisição, a chave e as duas roles → confere os pré-requisitos da etapa 1 → compila, testa e empacota as duas funções → planeja e aplica o Terraform → **grava a chave de assinatura no Secrets Manager** → valida funções, alias e segredos → executa o teste de fumaça. Um passo de segurança **interrompe o deploy se o plano previr exclusão** de função, segredo, parâmetro ou papel IAM, **ou criação de novo papel IAM**.
 
 ---
 
-## Validar
+## Validação
 
 ### Pelo Console AWS
 
 | Serviço | O que verificar |
 |---|---|
 | **Lambda** | Duas funções, cada uma com o alias `live` apontando para uma versão publicada |
-| **Lambda → Configuração** | A função de login está associada às subnets privadas; o autorizador não tem VPC |
+| **Lambda → Configuração** | `auth-cpf` associada às subnets privadas; `authorizer` sem VPC |
 | **Secrets Manager** | `/oficina/auth/jwt` com uma versão corrente |
-| **CloudWatch → Log groups** | Um grupo por função, com retenção de 14 dias |
+| **CloudWatch → Log groups** | Um grupo por função, retenção de 14 dias |
 | **Parameter Store** | 4 parâmetros sob `/oficina/auth/` |
 
 ### Pela AWS CLI
@@ -203,7 +223,6 @@ Um passo de segurança **interrompe o deploy se o plano previr exclusão** de fu
 ```bash
 REGIAO=<sua-regiao>
 
-# Nomes das funções, a partir do que foi publicado
 FN_CPF=$(aws ssm get-parameter --name /oficina/auth/cpf/function-name \
   --region "$REGIAO" --query 'Parameter.Value' --output text)
 FN_AUTZ=$(aws ssm get-parameter --name /oficina/auth/authorizer/function-name \
@@ -215,24 +234,20 @@ aws lambda get-alias --function-name "$FN_CPF"  --name live --region "$REGIAO" \
 aws lambda get-alias --function-name "$FN_AUTZ" --name live --region "$REGIAO" \
   --query '{Alias:Name,Versao:FunctionVersion}' --output table
 
-# Segredos com exatamente uma versão corrente
+# Segredo de assinatura com uma versão corrente
 aws secretsmanager describe-secret --secret-id /oficina/auth/jwt \
   --region "$REGIAO" --query 'length(VersionIdsToStages)' --output text
 ```
 
 </details>
 
-### Validar o login pela API
-
-Só é possível **após a etapa 6**, quando as rotas passam a existir, e com um funcionário já cadastrado. O caminho recomendado é o workflow **AWS E2E Validate** do repositório [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4), que executa o fluxo completo.
-
-Ao validar manualmente, confira que um CPF inexistente e uma senha incorreta produzem **a mesma** resposta de credencial inválida, e nunca inclua token ou senha reais em relatórios ou capturas de tela.
+O login de ponta a ponta só pode ser exercitado **após a etapa 6**, com um funcionário cadastrado. O caminho recomendado é o **AWS E2E Validate** do repositório [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4). Ao validar manualmente, confirme que um CPF inexistente e uma senha incorreta produzem **a mesma** resposta de credencial inválida, e nunca inclua token ou senha reais em relatórios.
 
 ---
 
-## Executar e validar localmente
+## Execução local
 
-Não há emulador nem contêiner local: as funções são validadas por testes e pela análise estática. É o mesmo conjunto que a CI executa.
+Não há emulador local: as funções são validadas por testes e análise estática, o mesmo conjunto que a CI executa.
 
 ```bash
 dotnet restore
@@ -253,25 +268,22 @@ terraform init -backend=false
 terraform validate
 ```
 
-O empacotamento precisa rodar antes de qualquer plano do Terraform: o stack calcula o hash dos arquivos compactados e falha se eles não existirem.
-
-Em `samples/` há requisições de referência para as duas funções, com um CPF sintético.
+O empacotamento precisa rodar antes de qualquer plano do Terraform: o stack calcula o hash dos arquivos compactados e falha se eles não existirem. Em `samples/` há requisições de referência com um CPF sintético.
 
 ---
 
 ## Limitações conhecidas
 
-- **Escopo de autenticação reduzido.** Não há token de renovação, federação de identidade, múltiplo fator nem revogação imediata: um token permanece válido até expirar. Trocar a chave de assinatura invalida todos os tokens em circulação de uma só vez.
-- **Emissão restrita a funcionários.** O login consulta a tabela de funcionários do cadastro; perfis de cliente não são emitidos por esta função.
-- **Cobertura de integração ausente.** O projeto de testes de integração contém apenas um caso ignorado, que depende de um banco local. A cobertura real está nos testes de unidade.
-- **Teste de fumaça superficial.** Na validação pós-deploy, o modo que invoca a função diretamente confirma apenas que a invocação ocorre, sem inspecionar a resposta.
+- **Escopo de autenticação reduzido.** Sem token de renovação, federação, múltiplo fator ou revogação imediata: um token vale até expirar.
+- **Emissão restrita a funcionários.** O login consulta a tabela de funcionários do cadastro; perfis de cliente não são emitidos aqui.
+- **Cobertura de integração ausente.** A cobertura real está nos testes de unidade; o caso de integração depende de um banco local e fica ignorado.
 - **Deploy sem aprovação manual** e **credenciais estáticas**, como nos demais repositórios de infraestrutura.
 
 ---
 
-## Próxima etapa
+## Próximas etapas
 
-Com as funções publicadas e o alias ativo, prossiga para a **etapa 5** e publique os três microsserviços (podem ser feitos em paralelo):
+Com as funções publicadas e o alias `live` ativo, prossiga para a **etapa 5** e publique os três microsserviços (podem rodar em paralelo):
 
 - **→ [oficina-cadastro](https://github.com/fabianorodrigues/oficina-cadastro-fiap-fase4)**
 - **→ [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4)**
