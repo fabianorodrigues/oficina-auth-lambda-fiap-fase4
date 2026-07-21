@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "project": {
+    "name": "oficina"
+  },
+  "functions": {
+    "authCpf": {
+      "name": "oficina-auth-cpf",
+      "alias": "live",
+      "timeoutSeconds": 15,
+      "memorySize": 512,
+      "inVpc": true
+    },
+    "authorizer": {
+      "name": "oficina-authorizer",
+      "alias": "live",
+      "timeoutSeconds": 5,
+      "memorySize": 256,
+      "inVpc": false
+    }
+  },
+  "jwt": {
+    "algorithm": "HS256",
+    "issuer": "oficina",
+    "audience": "oficina-api",
+    "expirationMinutes": 60,
+    "clockSkewSeconds": 60,
+    "secretName": "/oficina/auth/jwt"
+  },
+  "database": {
+    "secretName": "/oficina/auth/database"
+  },
+  "ssm": {
+    "vpcId": "/oficina/infra/vpc/id",
+    "privateSubnet1": "/oficina/infra/subnets/private/1",
+    "privateSubnet2": "/oficina/infra/subnets/private/2",
+    "rdsSecurityGroupId": "/oficina/infra/rds/security-group-id",
+    "authCpfAliasArn": "/oficina/auth/cpf/alias-arn",
+    "authCpfFunctionName": "/oficina/auth/cpf/function-name",
+    "authorizerAliasArn": "/oficina/auth/authorizer/alias-arn",
+    "authorizerFunctionName": "/oficina/auth/authorizer/function-name"
+  }
+}
+

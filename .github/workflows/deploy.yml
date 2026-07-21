@@ -1,0 +1,202 @@
+name: Auth Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type DEPLOY to publish Auth and synchronize the JWT secret.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auth-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Auth Lambdas
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_STATE_KEY_AUTH: oficina/auth/terraform.tfstate
+      TF_STATE_BUCKET_FALLBACK: ${{ vars.TF_STATE_BUCKET }}
+      AUTH_CPF_ROLE_ARN: ${{ vars.AUTH_CPF_ROLE_ARN }}
+      AUTHORIZER_ROLE_ARN: ${{ vars.AUTHORIZER_ROLE_ARN }}
+      JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.10.5
+
+      - name: Validate request
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF -ne 'refs/heads/main') {
+            throw 'This workflow must run from main.'
+          }
+          if ('${{ inputs.confirmation }}' -cne 'DEPLOY') {
+            throw 'Confirmation must be DEPLOY.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:AWS_REGION)) {
+            throw 'Repository Variable AWS_REGION is required.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:JWT_SIGNING_KEY)) {
+            throw 'Repository Secret JWT_SIGNING_KEY is required.'
+          }
+          foreach ($name in @('AUTH_CPF_ROLE_ARN', 'AUTHORIZER_ROLE_ARN')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Repository Variable $name is required to reuse existing Lambda execution roles."
+            }
+          }
+
+      - name: Validate configuration
+        shell: pwsh
+        run: ./scripts/validate-official-config.ps1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Resolve Terraform backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $identity = aws sts get-caller-identity --output json | ConvertFrom-Json
+          $deterministicBucket = "oficina-terraform-state-$($identity.Account)-$env:AWS_REGION"
+          $bucket = $deterministicBucket
+          if (-not [string]::IsNullOrWhiteSpace($env:TF_STATE_BUCKET_FALLBACK) -and $env:TF_STATE_BUCKET_FALLBACK -ne $deterministicBucket) {
+            aws s3api head-bucket --bucket $deterministicBucket 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "Using temporary TF_STATE_BUCKET fallback. Rename or migrate the state bucket to $deterministicBucket to remove this variable."
+              $bucket = $env:TF_STATE_BUCKET_FALLBACK
+            }
+          }
+          aws s3api head-bucket --bucket $bucket
+          "TF_STATE_BUCKET=$bucket" | Add-Content -Path $env:GITHUB_ENV
+          "AWS_ACCOUNT_ID=$($identity.Account)" | Add-Content -Path $env:GITHUB_ENV
+
+      - name: Validate prerequisites
+        run: |
+          set -euo pipefail
+          aws ssm get-parameter --name /oficina/infra/vpc/id --region "${AWS_REGION}" >/dev/null
+          aws ssm get-parameter --name /oficina/infra/subnets/private/1 --region "${AWS_REGION}" >/dev/null
+          aws ssm get-parameter --name /oficina/infra/subnets/private/2 --region "${AWS_REGION}" >/dev/null
+          aws ssm get-parameter --name /oficina/infra/rds/security-group-id --region "${AWS_REGION}" >/dev/null
+          aws secretsmanager describe-secret --secret-id /oficina/auth/database --region "${AWS_REGION}" >/dev/null
+          current=$(aws secretsmanager list-secret-version-ids --secret-id /oficina/auth/database --include-deprecated --region "${AWS_REGION}" --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text)
+          test "$current" = "1"
+
+      - name: Build solution
+        shell: pwsh
+        run: ./scripts/package-lambdas.ps1 -RunTests
+
+      - name: Terraform fmt
+        working-directory: terraform/auth
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        working-directory: terraform/auth
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="key=${TF_STATE_KEY_AUTH}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Terraform validate
+        working-directory: terraform/auth
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: terraform/auth
+        run: |
+          terraform plan -input=false -out=tfplan \
+            -var="aws_region=${AWS_REGION}" \
+            -var="auth_cpf_role_arn=${AUTH_CPF_ROLE_ARN}" \
+            -var="authorizer_role_arn=${AUTHORIZER_ROLE_ARN}"
+
+      - name: Validate plan safety
+        working-directory: terraform/auth
+        run: |
+          set -euo pipefail
+          terraform show -json tfplan > tfplan.json
+          blocked=$(jq '[.resource_changes[]? | select(.type | IN("aws_lambda_function","aws_secretsmanager_secret","aws_ssm_parameter","aws_iam_role")) | select(.change.actions | index("delete"))] | length' tfplan.json)
+          if [ "$blocked" -gt 0 ]; then
+            echo "Terraform plan contains delete or replacement actions for protected Auth resources." >&2
+            jq -r '.resource_changes[]? | select(.change.actions | index("delete")) | "- " + .address + " " + (.change.actions | join(","))' tfplan.json >&2
+            exit 1
+          fi
+          iam_creates=$(jq '[.resource_changes[]? | select(.type=="aws_iam_role") | select(.change.actions | index("create"))] | length' tfplan.json)
+          if [ "$iam_creates" -gt 0 ]; then
+            echo "Terraform plan contains IAM role creation. Configure AUTH_CPF_ROLE_ARN and AUTHORIZER_ROLE_ARN." >&2
+            exit 1
+          fi
+          {
+            echo "## Auth Terraform Plan"
+            echo
+            echo "| Action | Count |"
+            echo "| --- | ---: |"
+            for action in create update delete; do
+              count=$(jq "[.resource_changes[]? | select(.change.actions | index(\"$action\"))] | length" tfplan.json)
+              echo "| $action | $count |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Terraform apply
+        working-directory: terraform/auth
+        run: terraform apply -input=false tfplan
+
+      - name: Sync JWT secret
+        shell: pwsh
+        run: ./scripts/sync-jwt-secret.ps1 -Region $env:AWS_REGION
+
+      - name: Validate resources
+        shell: pwsh
+        run: ./scripts/validate-auth-resources.ps1 -Region $env:AWS_REGION
+
+      - name: Validate JWT secret
+        run: |
+          set -euo pipefail
+          current=$(aws secretsmanager list-secret-version-ids --secret-id /oficina/auth/jwt --include-deprecated --region "${AWS_REGION}" --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text)
+          test "$current" = "1"
+
+      - name: Smoke tests
+        shell: pwsh
+        run: ./scripts/smoke-test-auth.ps1 -Mode Lambda -Region $env:AWS_REGION
+
+      - name: Publish summary
+        run: |
+          {
+            echo "## Auth Deploy"
+            echo
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Account ID: ${AWS_ACCOUNT_ID}"
+            echo "- Region: ${AWS_REGION}"
+            echo "- Terraform state bucket: ${TF_STATE_BUCKET}"
+            echo "- Terraform state key: ${TF_STATE_KEY_AUTH}"
+            echo "- Lambda alias: live"
+            echo "- JWT secret: AWSCURRENT validated"
+            echo "- Smoke test: passed"
+            echo
+            echo "Sensitive values were not printed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
