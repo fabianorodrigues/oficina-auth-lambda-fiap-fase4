@@ -21,3 +21,25 @@ variable "log_retention_days" {
   default     = 14
 }
 
+variable "auth_cpf_role_arn" {
+  type        = string
+  description = "Existing IAM role ARN for the CPF login Lambda. Leave empty only when Terraform is allowed to create IAM."
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.auth_cpf_role_arn) == "" || can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", trimspace(var.auth_cpf_role_arn)))
+    error_message = "auth_cpf_role_arn must be empty or a valid IAM role ARN."
+  }
+}
+
+variable "authorizer_role_arn" {
+  type        = string
+  description = "Existing IAM role ARN for the authorizer Lambda. Leave empty only when Terraform is allowed to create IAM."
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.authorizer_role_arn) == "" || can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", trimspace(var.authorizer_role_arn)))
+    error_message = "authorizer_role_arn must be empty or a valid IAM role ARN."
+  }
+}
+

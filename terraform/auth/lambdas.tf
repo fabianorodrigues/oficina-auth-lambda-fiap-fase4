@@ -11,7 +11,7 @@ resource "aws_cloudwatch_log_group" "authorizer" {
 resource "aws_lambda_function" "auth_cpf" {
   function_name    = local.auth_cpf_function_name
   description      = "Autenticacao por CPF e senha para Oficina."
-  role             = aws_iam_role.auth_cpf.arn
+  role             = local.auth_cpf_role_arn
   handler          = "Oficina.Auth.Cpf::Oficina.Auth.Cpf.Function::FunctionHandler"
   runtime          = "dotnet10"
   filename         = var.auth_cpf_zip_path
@@ -52,7 +52,7 @@ resource "aws_lambda_function" "auth_cpf" {
 resource "aws_lambda_function" "authorizer" {
   function_name    = local.authorizer_function_name
   description      = "Lambda authorizer JWT para API Gateway HTTP API."
-  role             = aws_iam_role.authorizer.arn
+  role             = local.authorizer_role_arn
   handler          = "Oficina.Auth.Authorizer::Oficina.Auth.Authorizer.Function::FunctionHandler"
   runtime          = "dotnet10"
   filename         = var.authorizer_zip_path

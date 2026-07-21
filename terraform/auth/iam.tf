@@ -10,27 +10,37 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 }
 
 resource "aws_iam_role" "auth_cpf" {
+  count = local.create_auth_cpf_role ? 1 : 0
+
   name               = "oficina-auth-cpf-lambda"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
 resource "aws_iam_role" "authorizer" {
+  count = local.create_authorizer_role ? 1 : 0
+
   name               = "oficina-authorizer-lambda"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
 resource "aws_iam_role_policy_attachment" "auth_cpf_basic" {
-  role       = aws_iam_role.auth_cpf.name
+  count = local.create_auth_cpf_role ? 1 : 0
+
+  role       = aws_iam_role.auth_cpf[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 resource "aws_iam_role_policy_attachment" "auth_cpf_vpc" {
-  role       = aws_iam_role.auth_cpf.name
+  count = local.create_auth_cpf_role ? 1 : 0
+
+  role       = aws_iam_role.auth_cpf[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
 resource "aws_iam_role_policy_attachment" "authorizer_basic" {
-  role       = aws_iam_role.authorizer.name
+  count = local.create_authorizer_role ? 1 : 0
+
+  role       = aws_iam_role.authorizer[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
@@ -52,14 +62,18 @@ data "aws_iam_policy_document" "authorizer_secrets" {
 }
 
 resource "aws_iam_role_policy" "auth_cpf_secrets" {
+  count = local.create_auth_cpf_role ? 1 : 0
+
   name   = "oficina-auth-cpf-secrets"
-  role   = aws_iam_role.auth_cpf.id
+  role   = aws_iam_role.auth_cpf[0].id
   policy = data.aws_iam_policy_document.auth_cpf_secrets.json
 }
 
 resource "aws_iam_role_policy" "authorizer_secrets" {
+  count = local.create_authorizer_role ? 1 : 0
+
   name   = "oficina-authorizer-secrets"
-  role   = aws_iam_role.authorizer.id
+  role   = aws_iam_role.authorizer[0].id
   policy = data.aws_iam_policy_document.authorizer_secrets.json
 }
 

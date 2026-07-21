@@ -24,6 +24,8 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       TF_STATE_KEY_AUTH: oficina/auth/terraform.tfstate
       TF_STATE_BUCKET_FALLBACK: ${{ vars.TF_STATE_BUCKET }}
+      AUTH_CPF_ROLE_ARN: ${{ vars.AUTH_CPF_ROLE_ARN }}
+      AUTHORIZER_ROLE_ARN: ${{ vars.AUTHORIZER_ROLE_ARN }}
       JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
     steps:
       - name: Checkout
@@ -54,6 +56,11 @@ jobs:
           }
           if ([string]::IsNullOrWhiteSpace($env:JWT_SIGNING_KEY)) {
             throw 'Repository Secret JWT_SIGNING_KEY is required.'
+          }
+          foreach ($name in @('AUTH_CPF_ROLE_ARN', 'AUTHORIZER_ROLE_ARN')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Repository Variable $name is required to reuse existing Lambda execution roles."
+            }
           }
 
       - name: Validate configuration
@@ -121,7 +128,11 @@ jobs:
 
       - name: Terraform plan
         working-directory: terraform/auth
-        run: terraform plan -input=false -out=tfplan -var="aws_region=${AWS_REGION}"
+        run: |
+          terraform plan -input=false -out=tfplan \
+            -var="aws_region=${AWS_REGION}" \
+            -var="auth_cpf_role_arn=${AUTH_CPF_ROLE_ARN}" \
+            -var="authorizer_role_arn=${AUTHORIZER_ROLE_ARN}"
 
       - name: Validate plan safety
         working-directory: terraform/auth
@@ -132,6 +143,11 @@ jobs:
           if [ "$blocked" -gt 0 ]; then
             echo "Terraform plan contains delete or replacement actions for protected Auth resources." >&2
             jq -r '.resource_changes[]? | select(.change.actions | index("delete")) | "- " + .address + " " + (.change.actions | join(","))' tfplan.json >&2
+            exit 1
+          fi
+          iam_creates=$(jq '[.resource_changes[]? | select(.type=="aws_iam_role") | select(.change.actions | index("create"))] | length' tfplan.json)
+          if [ "$iam_creates" -gt 0 ]; then
+            echo "Terraform plan contains IAM role creation. Configure AUTH_CPF_ROLE_ARN and AUTHORIZER_ROLE_ARN." >&2
             exit 1
           fi
           {
