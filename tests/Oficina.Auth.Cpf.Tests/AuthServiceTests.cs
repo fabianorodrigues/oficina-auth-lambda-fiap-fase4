@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Amazon.Lambda.APIGatewayEvents;
 using Microsoft.Extensions.Logging.Abstractions;
 using Oficina.Auth.Shared;
 
@@ -5,6 +7,37 @@ namespace Oficina.Auth.Cpf.Tests;
 
 public sealed class AuthServiceTests
 {
+    [Fact]
+    public void Http_response_serializa_contrato_proxy_v2()
+    {
+        var json = JsonSerializer.Serialize(new HttpApiResponse
+        {
+            StatusCode = 400,
+            Headers = new Dictionary<string, string> { ["Content-Type"] = "application/json" },
+            Body = "{}"
+        });
+
+        using var document = JsonDocument.Parse(json);
+        Assert.True(document.RootElement.TryGetProperty("statusCode", out _));
+        Assert.True(document.RootElement.TryGetProperty("headers", out _));
+        Assert.True(document.RootElement.TryGetProperty("body", out _));
+        Assert.True(document.RootElement.TryGetProperty("isBase64Encoded", out _));
+        Assert.False(document.RootElement.TryGetProperty("StatusCode", out _));
+    }
+
+    [Fact]
+    public async Task Function_cpf_invalido_retorna_400_sem_dependencias_externas()
+    {
+        var response = await new Function().FunctionHandler(new APIGatewayHttpApiV2ProxyRequest
+        {
+            Body = "{\"cpf\":\"00000000000\",\"password\":\"invalid-smoke-test\"}",
+            Headers = new Dictionary<string, string>()
+        }, new TestLambdaContext());
+
+        Assert.Equal(400, response.StatusCode);
+        Assert.Contains("invalid_request", response.Body);
+    }
+
     [Fact]
     public async Task Usuario_valido_emite_token_com_claims()
     {

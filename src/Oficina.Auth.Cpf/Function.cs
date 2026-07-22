@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.Serialization.SystemTextJson;
@@ -17,15 +18,11 @@ public sealed class Function
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly ILoggerFactory LoggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder => builder.AddSimpleConsole(o => o.SingleLine = true));
     private static readonly ISystemClock Clock = new SystemClock();
-    private static readonly ISecretProvider SecretProvider = new AwsSecretsManagerSecretProvider(
-        new AmazonSecretsManagerClient(),
-        TimeSpan.FromMinutes(GetIntEnvironment("SECRETS__CACHE_TTL_SECONDS", 300) / 60.0),
-        Clock,
-        LoggerFactory.CreateLogger<AwsSecretsManagerSecretProvider>());
+    private static readonly Lazy<ISecretProvider> SecretProvider = new(CreateSecretProvider);
 
     private static bool _coldStart = true;
 
-    public async Task<APIGatewayHttpApiV2ProxyResponse> FunctionHandler(APIGatewayHttpApiV2ProxyRequest request, ILambdaContext context)
+    public async Task<HttpApiResponse> FunctionHandler(APIGatewayHttpApiV2ProxyRequest request, ILambdaContext context)
     {
         var stopwatch = Stopwatch.StartNew();
         var logger = LoggerFactory.CreateLogger<Function>();
@@ -40,8 +37,8 @@ public sealed class Function
             var password = ValidatePassword(authRequest.Password);
 
             var jwtOptions = ReadJwtOptions();
-            var jwtKey = await SecretProvider.GetRequiredValueAsync(jwtOptions.SecretName, jwtOptions.SigningKeyPropertyName, CancellationToken.None);
-            var connectionString = await SecretProvider.GetRequiredValueAsync(GetEnvironment("DATABASE__SECRET_NAME", DatabaseSecretNameDefault), "ConnectionString", CancellationToken.None);
+            var jwtKey = await SecretProvider.Value.GetRequiredValueAsync(jwtOptions.SecretName, jwtOptions.SigningKeyPropertyName, CancellationToken.None);
+            var connectionString = await SecretProvider.Value.GetRequiredValueAsync(GetEnvironment("DATABASE__SECRET_NAME", DatabaseSecretNameDefault), "ConnectionString", CancellationToken.None);
 
             var service = new AuthService(
                 new SqlAuthUserRepository(connectionString, LoggerFactory.CreateLogger<SqlAuthUserRepository>()),
@@ -101,7 +98,7 @@ public sealed class Function
         SecretName = GetEnvironment("JWT__SECRET_NAME", "/oficina/auth/jwt")
     };
 
-    private static APIGatewayHttpApiV2ProxyResponse Json(int statusCode, object value) => new()
+    private static HttpApiResponse Json(int statusCode, object value) => new()
     {
         StatusCode = statusCode,
         Headers = new Dictionary<string, string> { ["Content-Type"] = "application/json" },
@@ -123,4 +120,25 @@ public sealed class Function
 
     private static int GetIntEnvironment(string name, int fallback)
         => int.TryParse(Environment.GetEnvironmentVariable(name), out var value) ? value : fallback;
+
+    private static ISecretProvider CreateSecretProvider() => new AwsSecretsManagerSecretProvider(
+        new AmazonSecretsManagerClient(),
+        TimeSpan.FromMinutes(GetIntEnvironment("SECRETS__CACHE_TTL_SECONDS", 300) / 60.0),
+        Clock,
+        LoggerFactory.CreateLogger<AwsSecretsManagerSecretProvider>());
+}
+
+public sealed class HttpApiResponse
+{
+    [JsonPropertyName("statusCode")]
+    public int StatusCode { get; init; }
+
+    [JsonPropertyName("headers")]
+    public Dictionary<string, string> Headers { get; init; } = [];
+
+    [JsonPropertyName("body")]
+    public string Body { get; init; } = string.Empty;
+
+    [JsonPropertyName("isBase64Encoded")]
+    public bool IsBase64Encoded { get; init; }
 }
