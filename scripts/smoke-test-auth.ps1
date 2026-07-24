@@ -45,13 +45,17 @@ function Invoke-LambdaJson {
     $suffix = [Guid]::NewGuid().ToString('N')
     $payloadPath = Join-Path ([IO.Path]::GetTempPath()) "oficina-$FunctionName-$suffix.payload.json"
     $outputPath = Join-Path ([IO.Path]::GetTempPath()) "oficina-$FunctionName-$suffix.output.json"
+    $stderrPath = Join-Path ([IO.Path]::GetTempPath()) "oficina-$FunctionName-$suffix.stderr.txt"
 
     try {
         Write-Utf8NoBom -Path $payloadPath -Value $Payload
-        $invokeRaw = aws lambda invoke --function-name "$FunctionName`:live" --payload "fileb://$payloadPath" --region $Region $outputPath 2>&1
+        $invokeRaw = aws lambda invoke --function-name "$FunctionName`:live" --payload "fileb://$payloadPath" --region $Region $outputPath 2>$stderrPath
         $lastExitCodeVariable = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
         $lastExitCode = if ($null -eq $lastExitCodeVariable) { 0 } else { $lastExitCodeVariable.Value }
-        if ($lastExitCode -ne 0) { throw "aws lambda invoke $FunctionName failed: $invokeRaw" }
+        if ($lastExitCode -ne 0) {
+            $stderr = if (Test-Path -LiteralPath $stderrPath) { (Get-Content -LiteralPath $stderrPath -Raw) } else { "" }
+            throw "aws lambda invoke $FunctionName failed: $stderr"
+        }
 
         $invoke = ($invokeRaw | Out-String) | ConvertFrom-Json
         $functionError = Get-JsonProperty -Object $invoke -Name 'FunctionError'
@@ -68,6 +72,7 @@ function Invoke-LambdaJson {
     finally {
         Remove-Item -LiteralPath $payloadPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
     }
 }
 
