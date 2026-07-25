@@ -14,13 +14,19 @@ on:
       - "**/*.csproj"
       - ".config/dotnet-tools.json"
       - ".github/workflows/**"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: auth-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
