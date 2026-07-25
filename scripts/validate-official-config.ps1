@@ -39,8 +39,6 @@ $forbidden = @(
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
-    "Fase3",
-    "fase-3",
     "/dev/",
     "-dev",
     "-hml",

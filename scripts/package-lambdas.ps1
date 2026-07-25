@@ -10,7 +10,6 @@ $solution = Join-Path $root "Oficina.Auth.sln"
 $output = Join-Path $root "artifacts/lambda"
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 
-dotnet tool restore
 dotnet restore $solution
 dotnet build $solution -c Release --no-restore
 if ($RunTests) {
