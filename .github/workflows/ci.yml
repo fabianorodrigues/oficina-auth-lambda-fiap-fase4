@@ -27,8 +27,6 @@ jobs:
         with:
           dotnet-version: "10.0.x"
       - uses: hashicorp/setup-terraform@v4
-      - name: Restore tools
-        run: dotnet tool restore
       - name: Restore
         run: dotnet restore Oficina.Auth.sln
       - name: Build
