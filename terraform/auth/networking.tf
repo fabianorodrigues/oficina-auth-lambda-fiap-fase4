@@ -41,6 +41,17 @@ resource "aws_vpc_security_group_ingress_rule" "secretsmanager_from_auth_cpf_htt
   tags = merge(local.tags, { Name = "oficina-auth-secretsmanager-ingress-auth-cpf" })
 }
 
+resource "aws_vpc_security_group_ingress_rule" "secretsmanager_from_k8s_node_https" {
+  security_group_id            = aws_security_group.secretsmanager_endpoint.id
+  description                  = "HTTPS from K3s node"
+  ip_protocol                  = "tcp"
+  from_port                    = 443
+  to_port                      = 443
+  referenced_security_group_id = data.aws_ssm_parameter.k8s_security_group_id.value
+
+  tags = merge(local.tags, { Name = "oficina-auth-secretsmanager-ingress-k3s" })
+}
+
 resource "aws_vpc_security_group_ingress_rule" "rds_from_auth_cpf_sql" {
   security_group_id            = data.aws_ssm_parameter.rds_security_group_id.value
   description                  = "SQL Server from auth-cpf Lambda"

@@ -16,7 +16,10 @@ data "aws_ssm_parameter" "rds_security_group_id" {
   name = "/oficina/infra/rds/security-group-id"
 }
 
+data "aws_ssm_parameter" "k8s_security_group_id" {
+  name = "/oficina/infra/k8s/security-group-id"
+}
+
 data "aws_secretsmanager_secret" "database" {
   name = local.database_secret_name
 }
-
