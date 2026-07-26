@@ -45,8 +45,7 @@ public sealed class AwsSecretsManagerSecretProvider(
             if (string.IsNullOrWhiteSpace(response.SecretString))
                 throw new ControlledAuthException("secret_empty", $"Secret {secretName} sem SecretString.");
 
-            var values = JsonSerializer.Deserialize<Dictionary<string, string>>(response.SecretString)
-                ?? throw new ControlledAuthException("secret_json_invalid", $"Secret {secretName} invalido.");
+            var values = ParseSecretValues(secretName, response.SecretString);
 
             return new CachedSecret(values, clock.UtcNow.Add(ttl));
         }
@@ -63,6 +62,31 @@ public sealed class AwsSecretsManagerSecretProvider(
         }
     }
 
+    internal static IReadOnlyDictionary<string, string> ParseSecretValues(string secretName, string secretString)
+    {
+        using var document = JsonDocument.Parse(secretString);
+        if (document.RootElement.ValueKind is not JsonValueKind.Object)
+            throw new ControlledAuthException("secret_json_invalid", $"Secret {secretName} invalido.");
+
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            var value = property.Value.ValueKind switch
+            {
+                JsonValueKind.String => property.Value.GetString(),
+                JsonValueKind.Number => property.Value.GetRawText(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                JsonValueKind.Null => null,
+                _ => property.Value.GetRawText()
+            };
+
+            if (value is not null)
+                values[property.Name] = value;
+        }
+
+        return values;
+    }
+
     private sealed record CachedSecret(IReadOnlyDictionary<string, string> Values, DateTimeOffset ExpiresAt);
 }
-
