@@ -92,6 +92,19 @@ public sealed class SharedSecurityTests
     public void Jwt_exige_chave_forte()
         => Assert.Throws<ControlledAuthException>(() => new JwtTokenService(new JwtOptions(), "short", new SystemClock(), new GuidJtiGenerator()));
 
+    [Fact]
+    public void Secrets_parser_aceita_campos_nao_string()
+    {
+        const string connectionString = "Server=tcp:db.local,1433;Database=OficinaCadastroDb;";
+        var values = AwsSecretsManagerSecretProvider.ParseSecretValues(
+            "/oficina/auth/database",
+            $$"""{"ConnectionString":"{{connectionString}}","Port":1433,"Encrypt":true}""");
+
+        Assert.Equal(connectionString, values["ConnectionString"]);
+        Assert.Equal("1433", values["Port"]);
+        Assert.Equal("true", values["Encrypt"]);
+    }
+
     private sealed class FixedClock(DateTimeOffset now) : ISystemClock
     {
         public DateTimeOffset UtcNow => now;
