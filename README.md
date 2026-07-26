@@ -32,8 +32,8 @@ A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AW
 
 | Repositório | Responsabilidade | Etapas |
 |---|---|:---:|
-| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos, estado do Terraform e admin inicial | 1, 3 e 5.1 |
-| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma Kubernetes/ALB e entrada de API | 2 e 8 |
+| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos, estado do Terraform e admin inicial | 1, 3 e 6 |
+| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma Kubernetes/ALB, entrada de API e observabilidade | 2, 9 e 10 |
 | **oficina-auth-lambda** *(este)* | Autenticação por CPF e validação de token | 4 |
 | [oficina-cadastro](https://github.com/fabianorodrigues/oficina-cadastro-fiap-fase4) | Clientes, veículos, funcionários e catálogo de serviços | 5 |
 | [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4) | Peças, insumos, saldos e reservas | 6 |
@@ -59,16 +59,17 @@ Ambas são publicadas com o alias `live`, o alvo estável referenciado pela API 
 | 3 | oficina-infra-db | Database Bootstrap (estrutura) | `BOOTSTRAP` |
 | **4** | **oficina-auth-lambda** | **Auth Deploy** | `DEPLOY` |
 | 5 | oficina-cadastro | Cadastro Deploy | `DEPLOY` |
-| 5.1 | oficina-infra-db | Initial Admin Provision | `PROVISION_ADMIN` |
-| 6 | oficina-estoque | Estoque Deploy | `DEPLOY` |
-| 7 | oficina-ordens-servico | Ordens Deploy | `DEPLOY` |
-| 8 | oficina-infra | Entrypoint Deploy | `APPLY` |
-| 9 | oficina-ordens-servico | Collection Postman (execução manual) | — |
+| 6 | oficina-infra-db | Initial Admin Provision | `PROVISION_ADMIN` |
+| 7 | oficina-estoque | Estoque Deploy | `DEPLOY` |
+| 8 | oficina-ordens-servico | Ordens Deploy | `DEPLOY` |
+| 9 | oficina-infra | Entrypoint Deploy | `APPLY` |
+| 10 | oficina-infra | Observability Deploy | `DEPLOY` |
+| 11 | oficina-ordens-servico | Collection Postman (execução manual) | — |
 
-As etapas 6 e 7 não dependem do admin inicial e podem rodar em paralelo se desejado; a ordem acima é o caminho guiado. A etapa **5.1** é obrigatória no primeiro provisionamento do ambiente, opcional em redeploys quando o admin já existe, e deve acontecer antes da validação funcional da etapa 9. Após a etapa 8, o **Observability Validate** (oficina-infra) está disponível como validação **opcional**.
+As etapas 7 e 8 não dependem do admin inicial e podem rodar em paralelo se desejado; a ordem acima é o caminho guiado. A etapa **6** é obrigatória no primeiro provisionamento do ambiente, opcional em redeploys quando o admin já existe, e deve acontecer antes da validação funcional da etapa 11. Após a etapa 9, execute o **Observability Deploy** (oficina-infra) com `mode=DEPLOY`.
 
 > [!IMPORTANT]
-> Este repositório é a **etapa 4**. Depende da rede e do segredo de banco criados na etapa 1, e precisa estar publicado **antes da etapa 8**, porque o entrypoint só monta o autorizador se as duas funções já tiverem o alias `live` publicado. O login funciona de ponta a ponta somente após a etapa 3 criar os bancos, a etapa 5 aplicar o esquema do cadastro e a etapa 5.1 provisionar o administrador inicial.
+> Este repositório é a **etapa 4**. Depende da rede e do segredo de banco criados na etapa 1, e precisa estar publicado **antes da etapa 9**, porque o entrypoint só monta o autorizador se as duas funções já tiverem o alias `live` publicado. O login funciona de ponta a ponta somente após a etapa 3 criar os bancos, a etapa 5 aplicar o esquema do cadastro e a etapa 6 provisionar o administrador inicial.
 
 ---
 
@@ -245,7 +246,7 @@ aws secretsmanager describe-secret --secret-id /oficina/auth/jwt \
 
 </details>
 
-O login de ponta a ponta só pode ser exercitado **após a etapa 8**, com um funcionário cadastrado. O caminho recomendado é a **collection Postman** da etapa 9, em [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4#etapa-9--collection-postman-execução-manual), cuja primeira requisição é exatamente o login por CPF. Ao validar manualmente, confirme que um CPF inexistente e uma senha incorreta produzem **a mesma** resposta de credencial inválida, e nunca inclua token ou senha reais em relatórios.
+O login de ponta a ponta é validado pela **collection Postman** da etapa 11, em [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4), cuja primeira requisição é exatamente o login por CPF. Para testes manuais antes da etapa final, o Entrypoint Deploy já precisa estar concluído e deve existir um funcionário cadastrado. Ao validar manualmente, confirme que um CPF inexistente e uma senha incorreta produzem **a mesma** resposta de credencial inválida, e nunca inclua token ou senha reais em relatórios.
 
 ---
 
@@ -291,9 +292,9 @@ O empacotamento precisa rodar antes de qualquer plano do Terraform: o stack calc
 
 **→ [oficina-cadastro](https://github.com/fabianorodrigues/oficina-cadastro-fiap-fase4)** — seção [Como executar](https://github.com/fabianorodrigues/oficina-cadastro-fiap-fase4#como-executar).
 
-Após a etapa 5, volte ao **oficina-infra-db** para executar a etapa **5.1** (`Initial Admin Provision` com `confirmation=PROVISION_ADMIN`) e criar ou atualizar o administrador inicial exigido pela etapa 9. As etapas 6 e 7 publicam os outros microsserviços e podem rodar em paralelo, se preferir:
+Após a etapa 5, volte ao **oficina-infra-db** para executar a etapa **6** (`Initial Admin Provision` com `confirmation=PROVISION_ADMIN`) e criar ou atualizar o administrador inicial exigido pela etapa 11. As etapas 7 e 8 publicam os outros microsserviços e podem rodar em paralelo, se preferir:
 
-- **→ [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4)** (etapa 6)
-- **→ [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4)** (etapa 7)
+- **→ [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4)** (etapa 7)
+- **→ [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4)** (etapa 8)
 
 Para revisar a etapa anterior, volte a **[oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4)** (etapas 1 e 3).
