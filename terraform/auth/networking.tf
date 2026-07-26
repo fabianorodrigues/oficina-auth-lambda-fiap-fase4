@@ -41,6 +41,17 @@ resource "aws_vpc_security_group_ingress_rule" "secretsmanager_from_auth_cpf_htt
   tags = merge(local.tags, { Name = "oficina-auth-secretsmanager-ingress-auth-cpf" })
 }
 
+resource "aws_vpc_security_group_ingress_rule" "rds_from_auth_cpf_sql" {
+  security_group_id            = data.aws_ssm_parameter.rds_security_group_id.value
+  description                  = "SQL Server from auth-cpf Lambda"
+  ip_protocol                  = "tcp"
+  from_port                    = 1433
+  to_port                      = 1433
+  referenced_security_group_id = aws_security_group.auth_cpf.id
+
+  tags = merge(local.tags, { Name = "oficina-auth-rds-ingress-auth-cpf" })
+}
+
 resource "aws_vpc_endpoint" "secretsmanager" {
   vpc_id              = data.aws_ssm_parameter.vpc_id.value
   service_name        = "com.amazonaws.${var.aws_region}.secretsmanager"
